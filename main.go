@@ -18,8 +18,6 @@ type Cdx struct {
 	SpecVersion string `json:"specVersion"`
 	Components  []struct {
 		Name string `json:"name"`
-		//Ref       string   `json:"ref"`
-		//DependsOn []string `json:"dependsOn"`
 	} `json:"components"`
 }
 
@@ -57,24 +55,11 @@ func main() {
 		log.Fatalf("Error parsing JSON file: %v", err)
 	}
 	for _, v := range cdx.Components {
-		//pack := getPackageName(v.Ref)
 		pack := v.Name
 
 		r := new(repo)
 		err = dbCheckPack(pack, r, db)
 		if errors.Is(sql.ErrNoRows, err) {
-			//for _, d := range v.DependsOn {
-			//	transPack := getPackageName(d)
-			//	fmt.Println(transPack)
-			//	err = dbCheckPack(transPack, r, db)
-			//	if errors.Is(sql.ErrNoRows, err) {
-			//		continue
-			//	}
-			//	if err != nil {
-			//		panic(err)
-			//	}
-			//	res.toxicRepos = append(res.toxicRepos, *r)
-			//}
 			continue
 		}
 		if err != nil {
@@ -123,8 +108,3 @@ func parseJsonFile(fileDir string, fileName string, dest any) error {
 
 	return nil
 }
-
-//func getPackageName(ref string) string {
-//	s2, _, _ := strings.Cut(ref[strings.LastIndex(ref, "/")+1:], "@")
-//	return s2
-//}
