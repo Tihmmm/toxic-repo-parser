@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -34,6 +35,8 @@ type repo struct {
 	commitLink  string
 	description string
 }
+
+var blockers = []string{"malware", "ddos", "broken_assembly"}
 
 func main() {
 	db, err := sql.Open("sqlite3", "/tmp/toxic-repos.sqlite3")
@@ -80,7 +83,7 @@ func main() {
 		res.toxicRepos = append(res.toxicRepos, *r)
 	}
 
-	if len(res.toxicRepos) > 0 {
+	if len(res.toxicRepos) > 0 && !checkForBlockers(&res) {
 		fmt.Printf("Найдены токсичные компоненты:\n %v\n", res)
 	}
 }
@@ -88,6 +91,15 @@ func main() {
 func dbCheckPack(pack string, r *repo, db *sql.DB) error {
 	row := db.QueryRow("select * from repos where lower(name)=$1", strings.ToLower(pack))
 	return row.Scan(&r.id, &r.datetime, &r.problemType, &r.name, &r.commitLink, &r.description)
+}
+
+func checkForBlockers(toxicRepos *result) (passed bool) {
+	for _, v := range toxicRepos.toxicRepos {
+		if slices.Contains(blockers, v.problemType) {
+			return false
+		}
+	}
+	return true
 }
 
 func parseJsonFile(fileDir string, fileName string, dest any) error {
