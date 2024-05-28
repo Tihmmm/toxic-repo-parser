@@ -1,28 +1,26 @@
 package main
 
 import (
-	"database/sql"
-	"encoding/json"
-	"errors"
-	"fmt"
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/spf13/cobra"
 	"log"
 	"os"
-	"path/filepath"
 	"slices"
-	"strings"
 )
 
-type Cdx struct {
-	BomFormat   string `json:"bomFormat"`
-	SpecVersion string `json:"specVersion"`
-	Components  []struct {
-		Name string `json:"name"`
-	} `json:"components"`
+type component struct {
+	Name string `json:"name"`
+}
+
+type cdxJson struct {
+	BomFormat   string      `json:"bomFormat"`
+	SpecVersion string      `json:"specVersion"`
+	Components  []component `json:"components"`
 }
 
 type result struct {
 	toxicRepos []repo
+	components []component
 }
 
 type repo struct {
@@ -34,77 +32,90 @@ type repo struct {
 	description string
 }
 
-var blockers = []string{"malware", "ddos", "broken_assembly"}
-
 func main() {
-	db, err := sql.Open("sqlite3", "/tmp/toxic-repos.sqlite3")
-	if err != nil {
-		log.Fatal(err)
+	if err := rootCmd.Execute(); err != nil {
+		log.Println(err)
+		os.Exit(1)
 	}
-	defer func(db *sql.DB) {
-		err := db.Close()
-		if err != nil {
-			log.Fatal(err)
-		}
-	}(db)
+}
+
+var (
+	bomFormats      = []string{"cdxjson"}
+	datasourceTypes = []string{"sqlite3", "json", "csv"}
+	defaultBlockers = []string{"malware", "ddos", "broken_assembly"}
+)
+
+const (
+	defaultBomFormat        = "cdxjson"
+	defaultDatasourceRemote = "https://raw.githubusercontent.com/toxic-repos/toxic-repos/main/data/sqlite/toxic-repos.sqlite3"
+	defaultDatasourceType   = "sqlite3"
+	datasourceFetchDest     = "togore-ds"
+)
+
+var (
+	bom              string
+	bomFormat        string
+	datasourceLocal  string
+	datasourceRemote string
+	datasourceType   string
+	blockers         *[]string
+	output           string
+
+	rootCmd = &cobra.Command{
+		Use:     "togore [-f <path_to_datasource> || -u <datasource_url>] [-b <comma,separated,blockers>] [-o <path_for_output_file>] -s <path_to_bom> -k <bom_format> -t <datasource_type>",
+		Version: "omega",
+		Short:   "",
+		Long:    ``,
+		Run:     run,
+	}
+)
+
+func init() {
+	rootCmd.Flags().StringVarP(&bom, "bom", "s", "", "Path to BOM file for components to be parsed from (required)")
+	rootCmd.MarkFlagRequired("bom")
+	rootCmd.Flags().StringVarP(&bomFormat, "bom-format", "k", defaultBomFormat, "BOM format. Supported formats: cdxjson(=CycloneDX json) (required)")
+	rootCmd.MarkFlagRequired("bom-format")
+	rootCmd.Flags().StringVarP(&datasourceLocal, "datasource-path", "f", "", "Path to a toxic repos datasource")
+	rootCmd.Flags().StringVarP(&datasourceRemote, "datasource-url", "u", defaultDatasourceRemote, "URL address to a remote toxic repos datasource. Defaults to a sqlite db as provided by github.com/toxic-repos/toxic-repos")
+	rootCmd.MarkFlagsMutuallyExclusive("datasource-path", "datasource-url")
+	rootCmd.Flags().StringVarP(&datasourceType, "datasource-type", "t", defaultDatasourceType, "Datasource type. Supported types: sqlite3 (required)")
+	rootCmd.MarkFlagRequired("datasource-type")
+	blockers = rootCmd.Flags().StringSliceP("defaultBlockers", "b", defaultBlockers, "Comma separated list of problem types. If ANY of the provided problems is found, program exits with code 130. Default value is malware,ddos,broken_assembly")
+	rootCmd.Flags().StringVarP(&output, "output", "o", "", "Path to output file. If not specified, program writes to stdout")
+}
+
+func run(cmd *cobra.Command, args []string) {
+	if !argsValid() {
+		log.Println("Unsupported arguments")
+		os.Exit(1)
+	}
 
 	var res result
-	var cdx Cdx
-	err = parseJsonFile("/tmp/", "bom.json", &cdx)
-	if err != nil {
-		log.Fatalf("Error parsing JSON file: %v", err)
-	}
-	for _, v := range cdx.Components {
-		pack := v.Name
-
-		r := new(repo)
-		err = dbCheckPack(pack, r, db)
-		if errors.Is(sql.ErrNoRows, err) {
-			continue
-		}
-		if err != nil {
-			panic(err)
-		}
-		res.toxicRepos = append(res.toxicRepos, *r)
+	if err := parseBom(&res); err != nil {
+		os.Exit(1)
 	}
 
-	if len(res.toxicRepos) > 0 && !checkForBlockers(&res) {
-		fmt.Printf("Найдены токсичные компоненты:\n %v\n", res)
+	if err := parseDatasource(&res); err != nil {
+		os.Exit(1)
+	}
+
+	if len(res.toxicRepos) > 0 {
+		log.Printf("Found toxic repos:\n %v\n", res.toxicRepos)
+	}
+	if containsBlockers(res.toxicRepos) {
+		os.Exit(130)
 	}
 }
 
-func dbCheckPack(pack string, r *repo, db *sql.DB) error {
-	row := db.QueryRow("select * from repos where lower(name)=$1", strings.ToLower(pack))
-	return row.Scan(&r.id, &r.datetime, &r.problemType, &r.name, &r.commitLink, &r.description)
+func argsValid() bool {
+	return slices.Contains(bomFormats, bomFormat) && slices.Contains(datasourceTypes, datasourceType)
 }
 
-func checkForBlockers(toxicRepos *result) (passed bool) {
-	for _, v := range toxicRepos.toxicRepos {
-		if slices.Contains(blockers, v.problemType) {
-			return false
+func containsBlockers(toxicRepos []repo) bool {
+	for _, v := range toxicRepos {
+		if slices.Contains(*blockers, v.problemType) {
+			return true
 		}
 	}
-	return true
-}
-
-func parseJsonFile(fileDir string, fileName string, dest any) error {
-	jsonFile, err := os.Open(filepath.Join(fileDir, fileName))
-	if err != nil {
-		log.Printf("Error opening jsonFile file: %s, err: %s\n", fileName, err)
-		return err
-	}
-	defer func(file *os.File) {
-		err := file.Close()
-		if err != nil {
-			return
-		}
-	}(jsonFile)
-
-	jsonParser := json.NewDecoder(jsonFile)
-	if err = jsonParser.Decode(dest); err != nil {
-		log.Printf("Error decoding json file: %s, err: %s\n", fileName, err)
-		return err
-	}
-
-	return nil
+	return false
 }
