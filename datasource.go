@@ -10,12 +10,6 @@ import (
 	"strings"
 )
 
-type cdxJson struct {
-	BomFormat   string      `json:"bomFormat"`
-	SpecVersion string      `json:"specVersion"`
-	Components  []component `json:"components"`
-}
-
 func parseDatasource(dest *result) error {
 	var datasource string
 	if datasourceLocal != "" {
@@ -29,7 +23,7 @@ func parseDatasource(dest *result) error {
 
 	switch datasourceType {
 	case "sqlite3":
-		checkDB(dest, datasource)
+		return checkDB(dest, datasource)
 	default:
 		log.Println("Not implemented")
 		os.Exit(2)
@@ -60,7 +54,7 @@ func downloadDatasource(url string) error {
 		log.Printf("Error saving datasource file: %s\n", err)
 		return err
 	}
-	if _, err := io.Copy(f, resp.Body); err != nil {
+	if _, err = io.Copy(f, resp.Body); err != nil {
 		log.Printf("Error saving datasource file: %s\n", err)
 		return err
 	}

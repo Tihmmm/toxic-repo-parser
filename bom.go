@@ -6,6 +6,12 @@ import (
 	"toxic-repos/pkg/file"
 )
 
+type cdxJson struct {
+	BomFormat   string      `json:"bomFormat"`
+	SpecVersion string      `json:"specVersion"`
+	Components  []component `json:"components"`
+}
+
 func parseBom(dest *result) error {
 	switch bomFormat {
 	case "cdxjson":
