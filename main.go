@@ -8,19 +8,13 @@ import (
 	"slices"
 )
 
-type component struct {
-	Name string `json:"name"`
-}
-
-type cdxJson struct {
-	BomFormat   string      `json:"bomFormat"`
-	SpecVersion string      `json:"specVersion"`
-	Components  []component `json:"components"`
-}
-
 type result struct {
 	toxicRepos []repo
 	components []component
+}
+
+type component struct {
+	Name string `json:"name"`
 }
 
 type repo struct {
@@ -42,7 +36,7 @@ func main() {
 var (
 	bomFormats      = []string{"cdxjson"}
 	datasourceTypes = []string{"sqlite3", "json", "csv"}
-	defaultBlockers = []string{"malware", "ddos", "broken_assembly"}
+	blockers        = []string{"malware", "ddos", "broken_assembly"}
 )
 
 const (
@@ -58,11 +52,11 @@ var (
 	datasourceLocal  string
 	datasourceRemote string
 	datasourceType   string
-	blockers         *[]string
+	noFail           bool
 	output           string
 
 	rootCmd = &cobra.Command{
-		Use:     "togore [-f <path_to_datasource> || -u <datasource_url>] [-b <comma,separated,blockers>] [-o <path_for_output_file>] -s <path_to_bom> -k <bom_format> -t <datasource_type>",
+		Use:     "togore [-f <path_to_datasource> || -u <datasource_url>] [-b <comma,separated,blockers>] [--no-fail] [-o <path_for_output_file>] -s <path_to_bom> -k <bom_format> -t <datasource_type>",
 		Version: "omega",
 		Short:   "",
 		Long:    ``,
@@ -80,7 +74,8 @@ func init() {
 	rootCmd.MarkFlagsMutuallyExclusive("datasource-path", "datasource-url")
 	rootCmd.Flags().StringVarP(&datasourceType, "datasource-type", "t", defaultDatasourceType, "Datasource type. Supported types: sqlite3 (required)")
 	rootCmd.MarkFlagRequired("datasource-type")
-	blockers = rootCmd.Flags().StringSliceP("defaultBlockers", "b", defaultBlockers, "Comma separated list of problem types. If ANY of the provided problems is found, program exits with code 130. Default value is malware,ddos,broken_assembly")
+	rootCmd.Flags().StringSliceVarP(&blockers, "blockers", "b", blockers, "Comma separated list of problem types. If ANY of the provided problems is found and --no-fail is not set, program exits with code 130")
+	rootCmd.Flags().BoolVarP(&noFail, "no-fail", "p", false, "If this flag is set, the --blockers flag is ignored the program does not fail regardless of toxic repos found")
 	rootCmd.Flags().StringVarP(&output, "output", "o", "", "Path to output file. If not specified, program writes to stdout")
 }
 
@@ -102,7 +97,7 @@ func run(cmd *cobra.Command, args []string) {
 	if len(res.toxicRepos) > 0 {
 		log.Printf("Found toxic repos:\n %v\n", res.toxicRepos)
 	}
-	if containsBlockers(res.toxicRepos) {
+	if containsBlockers(res.toxicRepos) && !noFail {
 		os.Exit(130)
 	}
 }
@@ -113,7 +108,7 @@ func argsValid() bool {
 
 func containsBlockers(toxicRepos []repo) bool {
 	for _, v := range toxicRepos {
-		if slices.Contains(*blockers, v.problemType) {
+		if slices.Contains(blockers, v.problemType) {
 			return true
 		}
 	}

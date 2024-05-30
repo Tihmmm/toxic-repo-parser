@@ -10,6 +10,12 @@ import (
 	"strings"
 )
 
+type cdxJson struct {
+	BomFormat   string      `json:"bomFormat"`
+	SpecVersion string      `json:"specVersion"`
+	Components  []component `json:"components"`
+}
+
 func parseDatasource(dest *result) error {
 	var datasource string
 	if datasourceLocal != "" {
